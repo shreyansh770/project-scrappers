@@ -1,0 +1,99 @@
+name: Run Scrapers
+
+on:
+  # Scheduled runs — each scraper has its own cron
+  schedule:
+    - cron: '0 */6 * * *'   # rightmove_london — every 6 hours
+    - cron: '0 */12 * * *'  # zoopla_manchester — every 12 hours
+    - cron: '0 8 * * *'     # spareroom_birmingham — daily 8am
+
+  # Manual trigger from dashboard or GitHub UI
+  workflow_dispatch:
+    inputs:
+      scraper:
+        description: 'Scraper name (or "all" to run all)'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - rightmove_london
+          - zoopla_manchester
+          - spareroom_birmingham
+
+env:
+  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+  SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+  PYTHON_VERSION: '3.12'
+
+jobs:
+  # ─── Determine which scrapers to run ───
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Determine scrapers to run
+        id: set-matrix
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            SCRAPER="${{ github.event.inputs.scraper }}"
+            if [ "$SCRAPER" = "all" ]; then
+              echo 'matrix=["rightmove_london","zoopla_manchester","spareroom_birmingham"]' >> $GITHUB_OUTPUT
+            else
+              echo "matrix=[\"$SCRAPER\"]" >> $GITHUB_OUTPUT
+            fi
+          elif [ "${{ github.event_name }}" = "schedule" ]; then
+            # Map cron schedule index to scraper
+            CRON_INDEX="${{ github.event.schedule }}"
+            case "$CRON_INDEX" in
+              "0 */6 * * *")   echo 'matrix=["rightmove_london"]' >> $GITHUB_OUTPUT ;;
+              "0 */12 * * *")  echo 'matrix=["zoopla_manchester"]' >> $GITHUB_OUTPUT ;;
+              "0 8 * * *")     echo 'matrix=["spareroom_birmingham"]' >> $GITHUB_OUTPUT ;;
+              *)               echo 'matrix=["rightmove_london"]' >> $GITHUB_OUTPUT ;;
+            esac
+          else
+            echo 'matrix=["rightmove_london","zoopla_manchester","spareroom_birmingham"]' >> $GITHUB_OUTPUT
+          fi
+
+  # ─── Run each scraper as a parallel job ───
+  scrape:
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        scraper: ${{ fromJson(needs.prepare.outputs.matrix) }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run scraper — ${{ matrix.scraper }}
+        run: python scripts/run_all.py ${{ matrix.scraper }}
+        env:
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_SHA: ${{ github.sha }}
+
+  # ─── Summary notification (optional) ───
+  notify:
+    needs: scrape
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Summary
+        run: |
+          echo "## Scraper Run Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Scraper | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "Run completed. Check Supabase dashboard for details." >> $GITHUB_STEP_SUMMARY

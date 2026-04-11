@@ -1,0 +1,33 @@
+version: "3.9"
+
+services:
+  # ── Dashboard (React + Vite) ──
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile.dev
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./dashboard/src:/app/src
+      - ./dashboard/index.html:/app/index.html
+    env_file:
+      - ./dashboard/.env
+    depends_on:
+      - db
+
+  # ── Local PostgreSQL (alternative to Supabase for dev) ──
+  db:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: scrapers
+      POSTGRES_USER: scrapers
+      POSTGRES_PASSWORD: localdev123
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./sql/001_schema.sql:/docker-entrypoint-initdb.d/001_schema.sql
+
+volumes:
+  pgdata:

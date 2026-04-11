@@ -1,0 +1,39 @@
+# ===========================================
+# Scraper Registry
+# Each entry here maps to a file in scrapers/
+# ===========================================
+
+scrapers:
+  rightmove_london:
+    display_name: "Rightmove London Listings"
+    website: "rightmove.co.uk"
+    schedule: "0 */6 * * *"      # Every 6 hours
+    enabled: true
+    params:
+      location: "REGION^87490"
+      min_bedrooms: 1
+      max_price: 2000
+      property_type: "flat"
+
+  zoopla_manchester:
+    display_name: "Zoopla Manchester"
+    website: "zoopla.co.uk"
+    schedule: "0 */12 * * *"     # Every 12 hours
+    enabled: true
+    params:
+      location: "Manchester"
+      min_bedrooms: 1
+      max_price: 1500
+
+  spareroom_birmingham:
+    display_name: "SpareRoom Birmingham"
+    website: "spareroom.co.uk"
+    schedule: "0 8 * * *"        # Daily at 8am UTC
+    enabled: true
+    params:
+      location: "birmingham"
+
+# To add a new scraper:
+# 1. Add entry here
+# 2. Create scrapers/your_scraper_name.py (copy _template.py)
+# 3. Push to GitHub
