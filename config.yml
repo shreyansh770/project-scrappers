@@ -33,6 +33,13 @@ scrapers:
     params:
       location: "birmingham"
 
+  acc_us:
+    display_name: "American Campus Communities"
+    website: "americancampus.com"
+    schedule: "0 6 * * *"        # Daily at 6am UTC
+    enabled: true
+    params: {}
+
 # To add a new scraper:
 # 1. Add entry here
 # 2. Create scrapers/your_scraper_name.py (copy _template.py)

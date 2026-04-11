@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { fetchScrapers, fetchRuns, fetchStats, createScraper } from './lib/supabase';
-import { triggerScraperRun } from './lib/github';
+import { triggerScraperRun, createFullScraper } from './lib/github';
 import StatsBar from './components/StatsBar';
 import ScraperCard from './components/ScraperCard';
 import RunHistory from './components/RunHistory';
@@ -77,10 +77,17 @@ export default function App() {
   };
 
   const handleCreateScraper = async (config) => {
+    // 1. Create files in GitHub (scraper + config + workflow)
+    await createFullScraper(config);
+    
+    // 2. Register in Supabase
     const newScraper = await createScraper(config);
+    
+    // 3. Refresh and open editor
     await loadScrapers();
     setEditingScraper(newScraper);
     setShowNewModal(false);
+    showToast(`Created ${config.display_name} with cron schedule`);
   };
 
   const showToast = (msg, isError = false) => {

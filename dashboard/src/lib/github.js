@@ -94,3 +94,153 @@ export async function listScraperFiles() {
     .filter((f) => f.name.endsWith(".py") && !f.name.startsWith("_"))
     .map((f) => ({ name: f.name, path: f.path, sha: f.sha }));
 }
+
+// ─── Create complete scraper (file + config + workflow) ───
+
+export async function createFullScraper({
+  name,
+  display_name,
+  website,
+  schedule,
+}) {
+  // 1. Create the Python scraper file
+  const className = name
+    .split("_")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join("");
+
+  const scraperCode = `"""
+${display_name} — scraper for ${website}
+
+Auto-generated scraper template. Implement the scrape() method.
+"""
+
+from bs4 import BeautifulSoup
+from lib.base_scraper import BaseScraper
+
+
+class ${className}Scraper(BaseScraper):
+    NAME = "${name}"
+    DISPLAY_NAME = "${display_name}"
+    WEBSITE = "${website}"
+
+    def scrape(self) -> list[dict]:
+        """
+        Implement your scraping logic here.
+
+        Use self.fetch_page(url) for HTTP requests (has retry built in).
+        Use self.throttle() between requests to be polite.
+        Access config params via self.params (from config.yml).
+
+        Returns a list of dicts — each dict is one scraped record.
+        """
+        results = []
+
+        # Example:
+        # resp = self.fetch_page("https://${website}/listings")
+        # soup = BeautifulSoup(resp.text, "lxml")
+        #
+        # for card in soup.select(".listing-card"):
+        #     results.append({
+        #         "title": card.select_one(".title").text.strip(),
+        #         "price": card.select_one(".price").text.strip(),
+        #         "url": card.select_one("a")["href"],
+        #     })
+        #
+        # self.throttle()
+
+        return results
+
+
+if __name__ == "__main__":
+    ${className}Scraper().run()
+`;
+
+  await createFile(`scrapers/${name}.py`, scraperCode, `Add ${name} scraper`);
+
+  // 2. Update config.yml - add new scraper entry
+  const { content: configContent, sha: configSha } =
+    await getFileContent("config.yml");
+
+  const newScraperConfig = `
+  ${name}:
+    display_name: "${display_name}"
+    website: "${website}"
+    schedule: "${schedule}"
+    enabled: true
+    params: {}
+`;
+
+  // Insert before the "# To add a new scraper:" comment
+  const updatedConfig = configContent.replace(
+    /(\n# To add a new scraper:)/,
+    `${newScraperConfig}$1`,
+  );
+
+  await commitFile(
+    "config.yml",
+    updatedConfig,
+    `Add ${name} to config.yml`,
+    configSha,
+  );
+
+  // 3. Update workflow - add cron schedule and options
+  const { content: workflowContent, sha: workflowSha } = await getFileContent(
+    ".github/workflows/run_scrapers.yml",
+  );
+
+  let updatedWorkflow = workflowContent;
+
+  // Add cron schedule (before workflow_dispatch)
+  const cronComment = `    - cron: '${schedule}'     # ${name}`;
+  updatedWorkflow = updatedWorkflow.replace(
+    /(\n  # Manual trigger from dashboard)/,
+    `\n${cronComment}$1`,
+  );
+
+  // Add to workflow_dispatch options
+  updatedWorkflow = updatedWorkflow.replace(
+    /(options:\n(?:          - [^\n]+\n)+)/,
+    `$1          - ${name}\n`,
+  );
+
+  // Add to "all" matrix
+  updatedWorkflow = updatedWorkflow.replace(
+    /matrix=\["([^"]+)"\]' >> \$GITHUB_OUTPUT\n            else/,
+    (match, scrapers) => {
+      const list = scrapers.split('","');
+      if (!list.includes(name)) {
+        list.push(name);
+      }
+      return `matrix=["${list.join('","')}"]' >> $GITHUB_OUTPUT\n            else`;
+    },
+  );
+
+  // Add case for cron mapping
+  const caseEntry = `              "${schedule}")     echo 'matrix=["${name}"]' >> $GITHUB_OUTPUT ;;`;
+  updatedWorkflow = updatedWorkflow.replace(
+    /(\n              \*)               echo 'matrix=\["rightmove_london"\]'/,
+    `\n${caseEntry}$1`,
+  );
+
+  // Add to final else matrix
+  updatedWorkflow = updatedWorkflow.replace(
+    /else\n            echo 'matrix=\["([^"]+)"\]' >> \$GITHUB_OUTPUT\n          fi/,
+    (match, scrapers) => {
+      const list = scrapers.split('","');
+      if (!list.includes(name)) {
+        list.push(name);
+      }
+      return `else\n            echo 'matrix=["${list.join('","')}"]' >> $GITHUB_OUTPUT\n          fi`;
+    },
+  );
+
+  await commitFile(
+    ".github/workflows/run_scrapers.yml",
+    updatedWorkflow,
+    `Add ${name} to workflow schedule`,
+    workflowSha,
+  );
+
+  return { success: true, name };
+}
