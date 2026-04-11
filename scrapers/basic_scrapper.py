@@ -16,9 +16,9 @@ from dateutil.relativedelta import relativedelta
 from lib.base_scraper import BaseScraper
 
 
-class ACCUSScraper(BaseScraper):
-    NAME = "acc_us"
-    DISPLAY_NAME = "American Campus Communities"
+class BasicScrapperScraper(BaseScraper):
+    NAME = "basic_scrapper"
+    DISPLAY_NAME = "Basic Scrapper"
     WEBSITE = "americancampus.com"
 
     BASE_URL = "https://www.americancampus.com/api/lightning/floorplans/"
@@ -238,4 +238,4 @@ class ACCUSScraper(BaseScraper):
 
 
 if __name__ == "__main__":
-    ACCUSScraper().run()
+    BasicScrapperScraper().run()
