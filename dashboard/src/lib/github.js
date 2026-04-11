@@ -103,6 +103,8 @@ export async function createFullScraper({
   website,
   schedule,
 }) {
+  const errors = [];
+
   // 1. Create the Python scraper file
   const className = name
     .split("_")
@@ -156,13 +158,18 @@ if __name__ == "__main__":
     ${className}Scraper().run()
 `;
 
-  await createFile(`scrapers/${name}.py`, scraperCode, `Add ${name} scraper`);
+  try {
+    await createFile(`scrapers/${name}.py`, scraperCode, `Add ${name} scraper`);
+  } catch (e) {
+    errors.push(`Failed to create scraper file: ${e.message}`);
+  }
 
   // 2. Update config.yml - add new scraper entry
-  const { content: configContent, sha: configSha } =
-    await getFileContent("config.yml");
+  try {
+    const { content: configContent, sha: configSha } =
+      await getFileContent("config.yml");
 
-  const newScraperConfig = `
+    const newScraperConfig = `
   ${name}:
     display_name: "${display_name}"
     website: "${website}"
@@ -171,76 +178,92 @@ if __name__ == "__main__":
     params: {}
 `;
 
-  // Insert before the "# To add a new scraper:" comment
-  const updatedConfig = configContent.replace(
-    /(\n# To add a new scraper:)/,
-    `${newScraperConfig}$1`,
-  );
+    // Insert before the "# To add a new scraper:" comment
+    let updatedConfig = configContent;
+    if (configContent.includes("# To add a new scraper:")) {
+      updatedConfig = configContent.replace(
+        /(\n# To add a new scraper:)/,
+        `${newScraperConfig}$1`,
+      );
+    } else {
+      updatedConfig = configContent + newScraperConfig;
+    }
 
-  await commitFile(
-    "config.yml",
-    updatedConfig,
-    `Add ${name} to config.yml`,
-    configSha,
-  );
+    await commitFile(
+      "config.yml",
+      updatedConfig,
+      `Add ${name} to config.yml`,
+      configSha,
+    );
+  } catch (e) {
+    errors.push(`Failed to update config.yml: ${e.message}`);
+  }
 
   // 3. Update workflow - add cron schedule and options
-  const { content: workflowContent, sha: workflowSha } = await getFileContent(
-    ".github/workflows/run_scrapers.yml",
-  );
+  try {
+    const { content: workflowContent, sha: workflowSha } = await getFileContent(
+      ".github/workflows/run_scrapers.yml",
+    );
 
-  let updatedWorkflow = workflowContent;
+    let updatedWorkflow = workflowContent;
 
-  // Add cron schedule (before workflow_dispatch)
-  const cronComment = `    - cron: '${schedule}'     # ${name}`;
-  updatedWorkflow = updatedWorkflow.replace(
-    /(\n  # Manual trigger from dashboard)/,
-    `\n${cronComment}$1`,
-  );
+    // Add cron schedule (before workflow_dispatch) if not already there
+    if (!workflowContent.includes(`# ${name}`)) {
+      const cronComment = `    - cron: '${schedule}'     # ${name}`;
+      updatedWorkflow = updatedWorkflow.replace(
+        /(\n  # Manual trigger from dashboard)/,
+        `\n${cronComment}$1`,
+      );
+    }
 
-  // Add to workflow_dispatch options
-  updatedWorkflow = updatedWorkflow.replace(
-    /(options:\n(?:          - [^\n]+\n)+)/,
-    `$1          - ${name}\n`,
-  );
+    // Add to workflow_dispatch options if not already there
+    if (!workflowContent.includes(`- ${name}`)) {
+      updatedWorkflow = updatedWorkflow.replace(
+        /(options:\n(?:          - [^\n]+\n)+)/,
+        `$1          - ${name}\n`,
+      );
+    }
 
-  // Add to "all" matrix
-  updatedWorkflow = updatedWorkflow.replace(
-    /matrix=\["([^"]+)"\]' >> \$GITHUB_OUTPUT\n            else/,
-    (match, scrapers) => {
-      const list = scrapers.split('","');
-      if (!list.includes(name)) {
-        list.push(name);
-      }
-      return `matrix=["${list.join('","')}"]' >> $GITHUB_OUTPUT\n            else`;
-    },
-  );
+    // Add to "all" matrix arrays
+    const addToMatrix = (content) => {
+      return content.replace(
+        /matrix=\["([^"]+)"\]' >> \$GITHUB_OUTPUT/g,
+        (_, scrapers) => {
+          const list = scrapers.split('","');
+          if (!list.includes(name)) {
+            list.push(name);
+          }
+          return `matrix=["${list.join('","')}"]' >> $GITHUB_OUTPUT`;
+        },
+      );
+    };
+    updatedWorkflow = addToMatrix(updatedWorkflow);
 
-  // Add case for cron mapping
-  const caseEntry = `              "${schedule}")     echo 'matrix=["${name}"]' >> $GITHUB_OUTPUT ;;`;
-  updatedWorkflow = updatedWorkflow.replace(
-    /(\n              \*)               echo 'matrix=\["rightmove_london"\]'/,
-    `\n${caseEntry}$1`,
-  );
+    // Add case for cron mapping if not already there
+    if (
+      !updatedWorkflow.includes(`"${schedule}")`) ||
+      !updatedWorkflow.includes(`["${name}"]`)
+    ) {
+      const caseEntry = `              "${schedule}")     echo 'matrix=["${name}"]' >> $GITHUB_OUTPUT ;;`;
+      updatedWorkflow = updatedWorkflow.replace(
+        /(\n              \*)               echo 'matrix=\["rightmove_london"\]'/,
+        `\n${caseEntry}$1`,
+      );
+    }
 
-  // Add to final else matrix
-  updatedWorkflow = updatedWorkflow.replace(
-    /else\n            echo 'matrix=\["([^"]+)"\]' >> \$GITHUB_OUTPUT\n          fi/,
-    (match, scrapers) => {
-      const list = scrapers.split('","');
-      if (!list.includes(name)) {
-        list.push(name);
-      }
-      return `else\n            echo 'matrix=["${list.join('","')}"]' >> $GITHUB_OUTPUT\n          fi`;
-    },
-  );
+    await commitFile(
+      ".github/workflows/run_scrapers.yml",
+      updatedWorkflow,
+      `Add ${name} to workflow schedule`,
+      workflowSha,
+    );
+  } catch (e) {
+    errors.push(`Failed to update workflow: ${e.message}`);
+  }
 
-  await commitFile(
-    ".github/workflows/run_scrapers.yml",
-    updatedWorkflow,
-    `Add ${name} to workflow schedule`,
-    workflowSha,
-  );
+  if (errors.length > 0) {
+    console.warn("Some updates failed:", errors);
+  }
 
-  return { success: true, name };
+  return { success: errors.length === 0, name, errors };
 }
